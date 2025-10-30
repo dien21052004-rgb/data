@@ -88,12 +88,11 @@ pre{margin:0;font-size:12px;line-height:1.2}
 </div>
 
 <script>
- 
 let ESP_BASE = "";
 const DEFAULT_POLL = 1000;
 const maxPoints = 12;
 
-// Elements
+// DOM elements
 const freqEl = document.getElementById('Freq');
 const vavgEl = document.getElementById('Vavg');
 const iavgEl = document.getElementById('Iavg');
@@ -107,6 +106,33 @@ const ledOnBtn = document.getElementById('ledOn');
 const ledOffBtn = document.getElementById('ledOff');
 const ledDot = document.getElementById('ledDot');
 const ledText = document.getElementById('ledText');
+
+// --- ERA WIDGET INIT ---
+const eraWidget = new EraWidget();
+let onLight=null, offLight=null;
+let VAAction=null, VBAction=null, VCAction=null;
+let IAAction=null, IBAction=null, ICAction=null;
+let FAAction=null, FBAction=null, FCAction=null;
+let FreqAction=null, ipAction=null;
+
+eraWidget.init({
+  onConfiguration: (configuration)=>{
+    onLight = configuration.actions[0];
+    offLight = configuration.actions[1];
+    VAAction = configuration.actions[2];
+    VBAction = configuration.actions[3];
+    VCAction = configuration.actions[4];
+    IAAction = configuration.actions[5];
+    IBAction = configuration.actions[6];
+    ICAction = configuration.actions[7];
+    FAAction = configuration.actions[8];
+    FBAction = configuration.actions[9];
+    FCAction = configuration.actions[10];
+    FreqAction = configuration.actions[11];
+    ipAction = configuration.actions[12];
+  },
+  onValues: (values)=>{}
+});
 
 // Log helper
 function log(msg){
@@ -130,15 +156,27 @@ const gVa = new JustGage({id:'gVa', min:0, max:500, title:'V_A'});
 const gVb = new JustGage({id:'gVb', min:0, max:500, title:'V_B'});
 const gVc = new JustGage({id:'gVc', min:0, max:500, title:'V_C'});
 
-// Set ESP base
-function setESPBase(ip){
-  ip = ip.trim();
-  if(!ip.startsWith('http')) ip = 'http://' + ip;
-  ESP_BASE = ip;
-  log('ESP base set to ' + ESP_BASE);
+// --- Hàm gửi dữ liệu lên ERA WIDGET ---
+async function sendEraData(action, value=null){
+  if(!action) return;
+  try{
+    await eraWidget.triggerAction(action, value);
+    log(`ERa Widget action triggered: ${action.name || 'unknown'} value=${JSON.stringify(value)}`);
+  }catch(e){
+    log('ERa Widget error: '+e.message);
+  }
 }
 
-// Fetch data
+// --- Set ESP IP ---
+function setESPBase(ip){
+  ip = ip.trim();
+  if(!ip.startsWith('http')) ip='http://'+ip;
+  ESP_BASE = ip;
+  log('ESP base set to '+ESP_BASE);
+  sendEraData(ipAction, ip); // Gửi IP lên ERA WIDGET
+}
+
+// --- Fetch Data ---
 async function fetchData(){
   if(!ESP_BASE) return;
   try{
@@ -190,68 +228,53 @@ async function fetchData(){
 
     gVa.refresh(VA); gVb.refresh(VB); gVc.refresh(VC);
 
-    statusDot.style.backgroundColor = 'var(--status-ok)';
-    statusText.innerText = 'Online';
+    // --- Gửi dữ liệu lên ERA WIDGET ---
+    sendEraData(VAAction, VA);
+    sendEraData(VBAction, VB);
+    sendEraData(VCAction, VC);
+    sendEraData(IAAction, IA);
+    sendEraData(IBAction, IB);
+    sendEraData(ICAction, IC);
+    sendEraData(FAAction, FA);
+    sendEraData(FBAction, FB);
+    sendEraData(FCAction, FC);
+    sendEraData(FreqAction, Freq);
+
+    statusDot.style.backgroundColor='var(--status-ok)';
+    statusText.innerText='Online';
     log('Data updated');
   }catch(e){
-    statusDot.style.backgroundColor = 'var(--status-off)';
-    statusText.innerText = 'Offline / Error';
+    statusDot.style.backgroundColor='var(--status-off)';
+    statusText.innerText='Offline / Error';
     log('Fetch error: '+e.message);
   }
 }
-ledOnBtn.onclick = ()=>setLED(1);
-ledOffBtn.onclick = ()=>setLED(0);
 
-// Apply IP button
-applyIpBtn.onclick=()=>{setESPBase(espIpInput.value); fetchData();};
-
-// Polling
-setInterval(fetchData, DEFAULT_POLL);
-const eraWidget = new EraWidget();
-let onLight = null;
-let offLight = null;
-eraWidget.init({
-  onConfiguration: (configuration) => {
-    onLight = configuration.actions[0];
-    offLight = configuration.actions[1];
-  },
-  onValues: (values) => {},
-}); 
-// LED control
+// --- LED Control ---
 async function setLED(state){
   if(!ESP_BASE) return;
-
-  // Trigger ERa Widget nếu có
-  try {
-    if(typeof onLight !== 'undefined' && typeof offLight !== 'undefined'){
-      if(state == 1){
-        await eraWidget.triggerAction(onLight.action, null);
-      } else {
-        await eraWidget.triggerAction(offLight.action, null);
-      }
-      log(`ERa Widget LED action triggered (state=${state})`);
-    }
-  } catch(e){
-    log('ERa Widget LED error: '+e.message);
-  }
-
-  // Gửi lệnh ESP32
   try{
+    if(state==1) sendEraData(onLight);
+    else sendEraData(offLight);
+
     const res = await fetch(`${ESP_BASE}/led?state=${state}`);
     if(!res.ok) throw new Error(res.statusText);
-
     ledDot.style.backgroundColor = state==1 ? 'var(--status-ok)' : 'var(--status-off)';
     ledText.innerText = state==1 ? 'LED đang bật' : 'LED đang tắt';
-    log(`ESP32 LED set to ${state}`);
   }catch(e){
     ledDot.style.backgroundColor = 'var(--status-wait)';
-    ledText.innerText = 'Lỗi';
+    ledText.innerText='Lỗi';
     log('ESP32 LED control error: '+e.message);
   }
 }
 
+// --- Event listeners ---
+applyIpBtn.onclick = ()=>{ setESPBase(espIpInput.value); fetchData(); };
+ledOnBtn.onclick = ()=>setLED(1);
+ledOffBtn.onclick = ()=>setLED(0);
 
-
+// Polling
+setInterval(fetchData, DEFAULT_POLL);
 </script>
 
 </body>
